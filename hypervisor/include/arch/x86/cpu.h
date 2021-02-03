@@ -721,10 +721,10 @@ void set_pcpu_nums(uint16_t num);
  */
 uint16_t get_pcpu_nums(void);
 bool is_pcpu_active(uint16_t pcpu_id);
-void init_pcpu_state(uint16_t pcpu_id);
 uint64_t get_active_pcpu_bitmap(void);
 void wait_all_pcpus_run(void);
-void init_pcpu_xsave(void);
+void set_active_pcpu_bitmap(uint16_t pcpu_id);
+void pcpu_set_current_state(uint16_t pcpu_id, enum pcpu_boot_state state);
 #else /* ASSEMBLER defined */
 
 #endif /* ASSEMBLER defined */

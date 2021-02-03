@@ -35,7 +35,7 @@ static volatile uint64_t pcpu_active_bitmap = 0UL;
 
 static void set_current_pcpu_id(uint16_t pcpu_id);
 
-static void pcpu_set_current_state(uint16_t pcpu_id, enum pcpu_boot_state state)
+void pcpu_set_current_state(uint16_t pcpu_id, enum pcpu_boot_state state)
 {
 	/* Check if state is initializing */
 	if (state == PCPU_STATE_INITIALIZING) {
@@ -64,7 +64,7 @@ uint16_t get_pcpu_nums(void)
 	return phys_cpu_num;
 }
 
-static void set_active_pcpu_bitmap(uint16_t pcpu_id)
+void set_active_pcpu_bitmap(uint16_t pcpu_id)
 {
 	bitmap_set_lock(pcpu_id, &pcpu_active_bitmap);
 
@@ -78,14 +78,6 @@ bool is_pcpu_active(uint16_t pcpu_id)
 uint64_t get_active_pcpu_bitmap(void)
 {
 	return pcpu_active_bitmap;
-}
-
-void init_pcpu_state(uint16_t pcpu_id)
-{
-	set_active_pcpu_bitmap(pcpu_id);
-
-	/* Set state for this CPU to initializing */
-	pcpu_set_current_state(pcpu_id, PCPU_STATE_INITIALIZING);
 }
 
 static void start_pcpu(uint16_t pcpu_id)
@@ -278,41 +270,6 @@ void wait_sync_change(volatile const uint64_t *sync, uint64_t wake_sync)
 	} else {
 		while ((*sync) != wake_sync) {
 			asm_pause();
-		}
-	}
-}
-
-void init_pcpu_xsave(void)
-{
-	uint64_t val64;
-	uint64_t xcr0, xss;
-	uint32_t eax, ebx, ecx, edx;
-
-	CPU_CR_READ(cr4, &val64);
-	val64 |= CR4_OSXSAVE;
-	CPU_CR_WRITE(cr4, val64);
-
-	if (get_pcpu_id() == BSP_CPU_ID) {
-		cpuid_subleaf(CPUID_FEATURES, 0x0U, &eax, &ebx, &ecx, &edx);
-
-		/* if set, update it */
-		if ((ecx & CPUID_ECX_OSXSAVE) != 0U) {
-			pcpu_set_cap(X86_FEATURE_OSXSAVE);
-
-			/* set xcr0 and xss with the componets bitmap get from cpuid */
-			cpuid_subleaf(CPUID_XSAVE_FEATURES, 0U, &eax, &ebx, &ecx, &edx);
-			xcr0 = ((uint64_t)edx << 32U) + eax;
-			cpuid_subleaf(CPUID_XSAVE_FEATURES, 1U, &eax, &ebx, &ecx, &edx);
-			xss = ((uint64_t)edx << 32U) + ecx;
-			write_xcr(0, xcr0);
-			msr_write(MSR_IA32_XSS, xss);
-
-			/* get xsave area size, containing all the state components
-			 * corresponding to bits currently set in XCR0 | IA32_XSS */
-			cpuid_subleaf(CPUID_XSAVE_FEATURES, 1U, &eax, &ebx, &ecx, &edx);
-			if (ebx > XSAVE_STATE_AREA_SIZE) {
-				panic("XSAVE area (%d bytes) exceeds the pre-allocated 4K region\n", ebx);
-			}
 		}
 	}
 }

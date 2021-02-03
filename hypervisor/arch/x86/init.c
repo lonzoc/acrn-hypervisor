@@ -17,6 +17,7 @@
 #include <ivshmem.h>
 #include <x86/init.h>
 #include <x86/cpu_caps.h>
+#include <x86/cpuid.h>
 #include <x86/per_cpu.h>
 #include <x86/lapic.h>
 #include <x86/e820.h>
@@ -100,6 +101,41 @@ static void enable_ac_for_splitlock(void)
 		msr_write(MSR_TEST_CTL, test_ctl);
 	}
 #endif /*CONFIG_ENFORCE_TURNOFF_AC*/
+}
+
+static void init_pcpu_xsave(void)
+{
+	uint64_t val64;
+	uint64_t xcr0, xss;
+	uint32_t eax, ebx, ecx, edx;
+
+	CPU_CR_READ(cr4, &val64);
+	val64 |= CR4_OSXSAVE;
+	CPU_CR_WRITE(cr4, val64);
+
+	if (get_pcpu_id() == BSP_CPU_ID) {
+		cpuid_subleaf(CPUID_FEATURES, 0x0U, &eax, &ebx, &ecx, &edx);
+
+		/* if set, update it */
+		if ((ecx & CPUID_ECX_OSXSAVE) != 0U) {
+			pcpu_set_cap(X86_FEATURE_OSXSAVE);
+
+			/* set xcr0 and xss with the componets bitmap get from cpuid */
+			cpuid_subleaf(CPUID_XSAVE_FEATURES, 0U, &eax, &ebx, &ecx, &edx);
+			xcr0 = ((uint64_t)edx << 32U) + eax;
+			cpuid_subleaf(CPUID_XSAVE_FEATURES, 1U, &eax, &ebx, &ecx, &edx);
+			xss = ((uint64_t)edx << 32U) + ecx;
+			write_xcr(0, xcr0);
+			msr_write(MSR_IA32_XSS, xss);
+
+			/* get xsave area size, containing all the state components
+			 * corresponding to bits currently set in XCR0 | IA32_XSS */
+			cpuid_subleaf(CPUID_XSAVE_FEATURES, 1U, &eax, &ebx, &ecx, &edx);
+			if (ebx > XSAVE_STATE_AREA_SIZE) {
+				panic("XSAVE area (%d bytes) exceeds the pre-allocated 4K region\n", ebx);
+			}
+		}
+	}
 }
 
 static void init_pcpu_comm_post(void)
@@ -249,6 +285,14 @@ static uint16_t get_pcpu_id_from_lapic_id(uint32_t lapic_id)
 	}
 
 	return pcpu_id;
+}
+
+static void init_pcpu_state(uint16_t pcpu_id)
+{
+	set_active_pcpu_bitmap(pcpu_id);
+
+	/* Set state for this CPU to initializing */
+	pcpu_set_current_state(pcpu_id, PCPU_STATE_INITIALIZING);
 }
 
 /* NOTE: this function is using temp stack, and after SWITCH_TO(runtime_sp, to)
